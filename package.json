@@ -1,0 +1,13 @@
+{
+  "name": "nhltrade",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NHL Trade Showcase Signal Dashboard",
+  "type": "module",
+  "scripts": {
+    "seed": "node scripts/seed.js"
+  },
+  "dependencies": {
+    "@vercel/kv": "^2.0.0"
+  }
+}

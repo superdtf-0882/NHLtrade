@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NHL Trade Showcase Signal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-border: #232830;
+    --text: #e6e8eb;
+    --text-dim: #9aa3ad;
+    --amber: #d8a657;
+    --amber-dim: #8a6a36;
+    --good: #5fa777;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 32px;
+  }
+
+  h1, h2 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  header {
+    margin-bottom: 32px;
+  }
+
+  header h1 {
+    font-size: 28px;
+    letter-spacing: -0.01em;
+  }
+
+  header p {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 6px;
+    max-width: 720px;
+    line-height: 1.5;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  @media (min-width: 1100px) {
+    .grid { grid-template-columns: 1.3fr 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .panel h2 {
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+
+  .panel .sub {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+
+  select {
+    background: #1c2026;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    width: 100%;
+    margin-bottom: 16px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  .badge.flagged {
+    background: rgba(216, 166, 87, 0.15);
+    color: var(--amber);
+    border: 1px solid var(--amber-dim);
+  }
+
+  .badge.clear {
+    background: rgba(95, 167, 119, 0.12);
+    color: var(--good);
+    border: 1px solid rgba(95, 167, 119, 0.4);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    background: #191d23;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .stat .label {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat .value {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  .stat .value.up { color: var(--amber); }
+  .stat .value.down { color: var(--good); }
+
+  canvas {
+    max-height: 320px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  th {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  tr.flagged td {
+    color: var(--amber);
+  }
+
+  .updated {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 12px;
+  }
+
+  .empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 20px 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NHL Trade Showcase Signal</h1>
+  <p>
+    Hypothesis: teams adjust a player's role &mdash; powerplay production, shot volume, ice time &mdash;
+    in the weeks before trading them. The public NHL API doesn't expose per-game powerplay TOI for
+    skaters, so this tracks a composite signal built from powerplay points, shots, and total TOI trend
+    instead. Composite &gt; 30 is flagged.
+  </p>
+</header>
+
+<div class="grid">
+
+  <section class="panel">
+    <h2>Historical Validation</h2>
+    <div class="sub">Does the signal exist? Select a player traded during the 2023-24 season.</div>
+
+    <select id="playerSelect"></select>
+
+    <div id="historicalContent"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Live Watchlist</h2>
+    <div class="sub">Who might be next? Current players ranked by showcase signal.</div>
+
+    <div id="watchlistContent"></div>
+    <div class="updated" id="watchlistUpdated"></div>
+  </section>
+
+</div>
+
+<script>
+let chart;
+
+function pctClass(pct) {
+  return pct > 0 ? 'up' : 'down';
+}
+
+function fmtPct(pct) {
+  return (pct > 0 ? '+' : '') + pct + '%';
+}
+
+async function loadPlayers() {
+  const res = await fetch('/api/players');
+  const data = await res.json();
+  const select = document.getElementById('playerSelect');
+  select.innerHTML = '';
+
+  if (!data.players.length) {
+    select.innerHTML = '<option>No players seeded yet</option>';
+    document.getElementById('historicalContent').innerHTML =
+      '<div class="empty">Run `npm run seed` to populate historical trade data.</div>';
+    return;
+  }
+
+  for (const p of data.players) {
+    const opt = document.createElement('option');
+    opt.value = p.playerId;
+    opt.textContent = `${p.playerName} (${p.fromTeam} → ${p.toTeam}, ${p.tradeDate})`;
+    select.appendChild(opt);
+  }
+
+  select.addEventListener('change', () => loadAnalysis(select.value));
+  loadAnalysis(data.players[0].playerId);
+}
+
+async function loadAnalysis(playerId) {
+  const res = await fetch(`/api/analyze?playerId=${playerId}`);
+  const data = await res.json();
+  const container = document.getElementById('historicalContent');
+
+  if (!data.valid) {
+    container.innerHTML = `<div class="empty">${data.reason || 'No analysis available'}</div>`;
+    return;
+  }
+
+  const badgeClass = data.flagged ? 'flagged' : 'clear';
+  const badgeText = data.flagged
+    ? `\u{1F4C8} +${data.composite} — FLAGGED`
+    : `No significant change (${data.composite})`;
+
+  container.innerHTML = `
+    <div class="badge ${badgeClass}">${badgeText}</div>
+    <div class="stats">
+      <div class="stat">
+        <div class="label">PP Points Trend</div>
+        <div class="value ${pctClass(data.metrics.ppPoints.pct)}">${fmtPct(data.metrics.ppPoints.pct)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Shots Trend</div>
+        <div class="value ${pctClass(data.metrics.shots.pct)}">${fmtPct(data.metrics.shots.pct)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">TOI Trend</div>
+        <div class="value ${pctClass(data.metrics.toi.pct)}">${fmtPct(data.metrics.toi.pct)}</div>
+      </div>
+    </div>
+    <canvas id="trendChart"></canvas>
+  `;
+
+  renderChart(data);
+}
+
+function renderChart(data) {
+  const sorted = [...data.gameLogs].sort((a, b) => new Date(a.gameDate) - new Date(b.gameDate));
+  const tradeDate = data.player.tradeDate;
+  const tradeIndex = sorted.findIndex((g) => g.gameDate >= tradeDate);
+  const boundaryIndex = tradeIndex === -1 ? sorted.length : tradeIndex;
+
+  const labels = sorted.map((g) => g.gameDate);
+  const ppPoints = sorted.map((g) => g.ppPoints);
+  const shots = sorted.map((g) => g.shots);
+
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (chart) chart.destroy();
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'PP Points / game',
+          data: ppPoints,
+          borderColor: '#d8a657',
+          backgroundColor: 'rgba(216, 166, 87, 0.08)',
+          tension: 0.3,
+          pointRadius: 0,
+          fill: true,
+        },
+        {
+          label: 'Shots / game',
+          data: shots,
+          borderColor: '#6b8fb5',
+          tension: 0.3,
+          pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#9aa3ad', font: { family: 'JetBrains Mono', size: 11 } } },
+        tradeLine: { index: boundaryIndex },
+      },
+      scales: {
+        x: { ticks: { color: '#9aa3ad', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#232830' } },
+        y: { ticks: { color: '#9aa3ad', font: { size: 10 } }, grid: { color: '#232830' } },
+      },
+    },
+    plugins: [{
+      id: 'tradeLine',
+      afterDraw(chartInstance, args, opts) {
+        const idx = opts.index;
+        if (idx == null || idx < 0 || idx >= chartInstance.scales.x.ticks.length + 1) return;
+        const xScale = chartInstance.scales.x;
+        const x = xScale.getPixelForValue(idx);
+        const { ctx, chartArea } = chartInstance;
+        ctx.save();
+        ctx.strokeStyle = '#d8a657';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        ctx.restore();
+      },
+    }],
+  });
+}
+
+async function loadWatchlist() {
+  const res = await fetch('/api/watchlist');
+  const data = await res.json();
+  const container = document.getElementById('watchlistContent');
+
+  if (!data.players.length) {
+    container.innerHTML = '<div class="empty">No watchlist players seeded yet.</div>';
+    return;
+  }
+
+  const rows = data.players
+    .filter((p) => p.valid)
+    .sort((a, b) => b.composite - a.composite)
+    .map((p) => `
+      <tr class="${p.flagged ? 'flagged' : ''}">
+        <td>${p.playerName}</td>
+        <td>${p.team ?? '-'}</td>
+        <td>${p.composite}</td>
+        <td>${p.flagged ? '\u{1F4C8} FLAGGED' : '-'}</td>
+      </tr>
+    `).join('');
+
+  container.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>Player</th><th>Team</th><th>Showcase Score</th><th>Status</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  document.getElementById('watchlistUpdated').textContent =
+    `Last updated: ${new Date(data.updatedAt).toLocaleString()}`;
+}
+
+loadPlayers();
+loadWatchlist();
+</script>
+
+</body>
+</html>
