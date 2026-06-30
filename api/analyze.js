@@ -16,8 +16,12 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: `No player found for id ${playerId}` });
   }
 
-  const gameLogs = (await kv.get(`gamelogs:${playerId}`)) || [];
-  const trend = evaluateTradeBump(gameLogs, player.tradeDate);
+  const [gameLogs, transactions] = await Promise.all([
+    kv.get(`gamelogs:${playerId}`).then((v) => v || []),
+    kv.get(`transactions:${playerId}`).then((v) => v || []),
+  ]);
+
+  const trend = evaluateTradeBump(gameLogs, player.tradeDate, transactions);
 
   const analysis = {
     playerId,

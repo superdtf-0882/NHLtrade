@@ -17,6 +17,8 @@
     --amber: #d8a657;
     --amber-dim: #8a6a36;
     --good: #5fa777;
+    --blue: #6b8fb5;
+    --warn: #c47a3a;
   }
 
   * { box-sizing: border-box; }
@@ -35,9 +37,7 @@
     margin: 0;
   }
 
-  header {
-    margin-bottom: 32px;
-  }
+  header { margin-bottom: 32px; }
 
   header h1 {
     font-size: 28px;
@@ -100,7 +100,7 @@
     border-radius: 6px;
     font-size: 13px;
     font-weight: 600;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
   }
 
   .badge.flagged {
@@ -109,10 +109,26 @@
     border: 1px solid var(--amber-dim);
   }
 
+  .badge.suppressed {
+    background: rgba(196, 122, 58, 0.12);
+    color: var(--warn);
+    border: 1px solid rgba(196, 122, 58, 0.4);
+  }
+
   .badge.clear {
     background: rgba(95, 167, 119, 0.12);
     color: var(--good);
     border: 1px solid rgba(95, 167, 119, 0.4);
+  }
+
+  .ir-note {
+    font-size: 11px;
+    color: var(--warn);
+    margin-bottom: 14px;
+    padding: 6px 10px;
+    background: rgba(196, 122, 58, 0.08);
+    border-left: 2px solid var(--warn);
+    border-radius: 0 4px 4px 0;
   }
 
   .stats {
@@ -145,9 +161,7 @@
   .stat .value.up { color: var(--amber); }
   .stat .value.down { color: var(--good); }
 
-  canvas {
-    max-height: 320px;
-  }
+  canvas { max-height: 320px; }
 
   table {
     width: 100%;
@@ -169,8 +183,25 @@
     font-weight: 500;
   }
 
-  tr.flagged td {
-    color: var(--amber);
+  tr.flagged td { color: var(--amber); }
+  tr.final-year td:first-child::after {
+    content: ' ★';
+    color: var(--blue);
+    font-size: 10px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .tag.contract {
+    background: rgba(107, 143, 181, 0.15);
+    color: var(--blue);
+    border: 1px solid rgba(107, 143, 181, 0.35);
   }
 
   .updated {
@@ -192,9 +223,8 @@
   <h1>NHL Trade Showcase Signal</h1>
   <p>
     Hypothesis: teams adjust a player's role &mdash; powerplay production, shot volume, ice time &mdash;
-    in the weeks before trading them. The public NHL API doesn't expose per-game powerplay TOI for
-    skaters, so this tracks a composite signal built from powerplay points, shots, and total TOI trend
-    instead. Composite &gt; 30 is flagged.
+    in the weeks before trading them. Composite signal &gt; 30 is flagged. IR returns within 30 days
+    suppress the flag (recovery, not showcase). ★ = final contract year.
   </p>
 </header>
 
@@ -203,16 +233,13 @@
   <section class="panel">
     <h2>Historical Validation</h2>
     <div class="sub">Does the signal exist? Select a player traded during the 2023-24 season.</div>
-
     <select id="playerSelect"></select>
-
     <div id="historicalContent"></div>
   </section>
 
   <section class="panel">
     <h2>Live Watchlist</h2>
-    <div class="sub">Who might be next? Current players ranked by showcase signal.</div>
-
+    <div class="sub">Who might be next? ★ = final contract year. Flagged rows are active signals.</div>
     <div id="watchlistContent"></div>
     <div class="updated" id="watchlistUpdated"></div>
   </section>
@@ -222,13 +249,8 @@
 <script>
 let chart;
 
-function pctClass(pct) {
-  return pct > 0 ? 'up' : 'down';
-}
-
-function fmtPct(pct) {
-  return (pct > 0 ? '+' : '') + pct + '%';
-}
+function pctClass(pct) { return pct > 0 ? 'up' : 'down'; }
+function fmtPct(pct) { return (pct > 0 ? '+' : '') + pct + '%'; }
 
 async function loadPlayers() {
   const res = await fetch('/api/players');
@@ -243,7 +265,17 @@ async function loadPlayers() {
     return;
   }
 
-  for (const p of data.players) {
+  // Sort by composite desc so the strongest signals appear first in dropdown.
+  const analyzed = await Promise.all(
+    data.players.map(async (p) => {
+      const r = await fetch(`/api/analyze?playerId=${p.playerId}`);
+      const d = await r.json();
+      return { ...p, composite: d.composite ?? -999 };
+    })
+  );
+  analyzed.sort((a, b) => b.composite - a.composite);
+
+  for (const p of analyzed) {
     const opt = document.createElement('option');
     opt.value = p.playerId;
     opt.textContent = `${p.playerName} (${p.fromTeam} → ${p.toTeam}, ${p.tradeDate})`;
@@ -251,7 +283,7 @@ async function loadPlayers() {
   }
 
   select.addEventListener('change', () => loadAnalysis(select.value));
-  loadAnalysis(data.players[0].playerId);
+  loadAnalysis(analyzed[0].playerId);
 }
 
 async function loadAnalysis(playerId) {
@@ -264,13 +296,23 @@ async function loadAnalysis(playerId) {
     return;
   }
 
-  const badgeClass = data.flagged ? 'flagged' : 'clear';
-  const badgeText = data.flagged
-    ? `\u{1F4C8} +${data.composite} — FLAGGED`
-    : `No significant change (${data.composite})`;
+  let badgeClass, badgeText, irNote = '';
+
+  if (data.flagged) {
+    badgeClass = 'flagged';
+    badgeText = `\u{1F4C8} +${data.composite} — FLAGGED`;
+  } else if (data.irSuppressed) {
+    badgeClass = 'suppressed';
+    badgeText = `⚠️ +${data.composite} — IR RETURN (signal suppressed)`;
+    irNote = `<div class="ir-note">Player returned from IR on ${data.irReturnDate} — within 30 days of the window. Bump attributed to recovery, not showcase.</div>`;
+  } else {
+    badgeClass = 'clear';
+    badgeText = `No significant change (${data.composite})`;
+  }
 
   container.innerHTML = `
     <div class="badge ${badgeClass}">${badgeText}</div>
+    ${irNote}
     <div class="stats">
       <div class="stat">
         <div class="label">PP Points Trend</div>
@@ -296,6 +338,10 @@ function renderChart(data) {
   const tradeDate = data.player.tradeDate;
   const tradeIndex = sorted.findIndex((g) => g.gameDate >= tradeDate);
   const boundaryIndex = tradeIndex === -1 ? sorted.length : tradeIndex;
+
+  const irIndex = data.irReturnDate
+    ? sorted.findIndex((g) => g.gameDate >= data.irReturnDate)
+    : null;
 
   const labels = sorted.map((g) => g.gameDate);
   const ppPoints = sorted.map((g) => g.ppPoints);
@@ -332,7 +378,7 @@ function renderChart(data) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { labels: { color: '#9aa3ad', font: { family: 'JetBrains Mono', size: 11 } } },
-        tradeLine: { index: boundaryIndex },
+        verticalLines: { tradeIndex: boundaryIndex, irIndex },
       },
       scales: {
         x: { ticks: { color: '#9aa3ad', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#232830' } },
@@ -340,22 +386,26 @@ function renderChart(data) {
       },
     },
     plugins: [{
-      id: 'tradeLine',
+      id: 'verticalLines',
       afterDraw(chartInstance, args, opts) {
-        const idx = opts.index;
-        if (idx == null || idx < 0 || idx >= chartInstance.scales.x.ticks.length + 1) return;
-        const xScale = chartInstance.scales.x;
-        const x = xScale.getPixelForValue(idx);
-        const { ctx, chartArea } = chartInstance;
-        ctx.save();
-        ctx.strokeStyle = '#d8a657';
-        ctx.setLineDash([4, 4]);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(x, chartArea.top);
-        ctx.lineTo(x, chartArea.bottom);
-        ctx.stroke();
-        ctx.restore();
+        const { ctx, chartArea, scales: { x } } = chartInstance;
+        const lines = [
+          { index: opts.tradeIndex, color: '#d8a657', dash: [4, 4] },
+          { index: opts.irIndex,    color: '#c47a3a', dash: [2, 3] },
+        ];
+        for (const line of lines) {
+          if (line.index == null || line.index < 0) continue;
+          const px = x.getPixelForValue(line.index);
+          ctx.save();
+          ctx.strokeStyle = line.color;
+          ctx.setLineDash(line.dash);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(px, chartArea.top);
+          ctx.lineTo(px, chartArea.bottom);
+          ctx.stroke();
+          ctx.restore();
+        }
       },
     }],
   });
@@ -374,19 +424,31 @@ async function loadWatchlist() {
   const rows = data.players
     .filter((p) => p.valid)
     .sort((a, b) => b.composite - a.composite)
-    .map((p) => `
-      <tr class="${p.flagged ? 'flagged' : ''}">
-        <td>${p.playerName}</td>
-        <td>${p.team ?? '-'}</td>
-        <td>${p.composite}</td>
-        <td>${p.flagged ? '\u{1F4C8} FLAGGED' : '-'}</td>
-      </tr>
-    `).join('');
+    .map((p) => {
+      const rowClass = [p.flagged ? 'flagged' : '', p.finalYear ? 'final-year' : ''].filter(Boolean).join(' ');
+      const statusCell = p.flagged
+        ? '\u{1F4C8} FLAGGED'
+        : p.irSuppressed
+          ? '⚠️ IR return'
+          : '-';
+      const contractCell = p.finalYear
+        ? `<span class="tag contract">${p.contractType ?? 'FA'} ${p.contractExpiryYear}</span>`
+        : '-';
+      return `
+        <tr class="${rowClass}">
+          <td>${p.playerName}</td>
+          <td>${p.team ?? '-'}</td>
+          <td>${p.composite}</td>
+          <td>${contractCell}</td>
+          <td>${statusCell}</td>
+        </tr>
+      `;
+    }).join('');
 
   container.innerHTML = `
     <table>
       <thead>
-        <tr><th>Player</th><th>Team</th><th>Showcase Score</th><th>Status</th></tr>
+        <tr><th>Player</th><th>Team</th><th>Score</th><th>Contract</th><th>Status</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
